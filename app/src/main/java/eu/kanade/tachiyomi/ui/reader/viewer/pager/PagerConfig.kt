@@ -1,113 +1,152 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
-import com.f2prateek.rx.preferences.Preference
-import eu.kanade.tachiyomi.data.preference.PreferencesHelper
-import eu.kanade.tachiyomi.util.addTo
-import rx.subscriptions.CompositeSubscription
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
+import eu.kanade.tachiyomi.ui.reader.viewer.ViewerConfig
+import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.DisabledNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.EdgeNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.KindlishNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.LNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.RightAndLeftNavigation
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 /**
  * Configuration used by pager viewers.
  */
-class PagerConfig(private val viewer: PagerViewer, preferences: PreferencesHelper = Injekt.get()) {
+class PagerConfig(
+    private val viewer: PagerViewer,
+    scope: CoroutineScope,
+    readerPreferences: ReaderPreferences = Injekt.get(),
+) : ViewerConfig(readerPreferences, scope) {
 
-    private val subscriptions = CompositeSubscription()
-
-    var imagePropertyChangedListener: (() -> Unit)? = null
-
-    var tappingEnabled = true
+    var theme = readerPreferences.readerTheme().get()
         private set
 
-    var longTapEnabled = true
+    var automaticBackground = false
         private set
 
-    var volumeKeysEnabled = false
-        private set
-
-    var volumeKeysInverted = false
-        private set
-
-    var usePageTransitions = false
-        private set
+    var dualPageSplitChangedListener: ((Boolean) -> Unit)? = null
 
     var imageScaleType = 1
         private set
 
-    var imageZoomType = ZoomType.Left
+    var imageZoomType = ReaderPageImageView.ZoomStartPosition.LEFT
         private set
 
     var imageCropBorders = false
         private set
 
-    var doubleTapAnimDuration = 500
+    var navigateToPan = false
+        private set
+
+    var landscapeZoom = false
         private set
 
     init {
-        preferences.readWithTapping()
-            .register({ tappingEnabled = it })
+        readerPreferences.readerTheme()
+            .register(
+                {
+                    theme = it
+                    automaticBackground = it == 3
+                },
+                { imagePropertyChangedListener?.invoke() },
+            )
 
-        preferences.readWithLongTap()
-            .register({ longTapEnabled = it })
-
-        preferences.pageTransitions()
-            .register({ usePageTransitions = it })
-
-        preferences.imageScaleType()
+        readerPreferences.imageScaleType()
             .register({ imageScaleType = it }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.zoomStart()
+        readerPreferences.zoomStart()
             .register({ zoomTypeFromPreference(it) }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.cropBorders()
+        readerPreferences.cropBorders()
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.doubleTapAnimSpeed()
-            .register({ doubleTapAnimDuration = it })
+        readerPreferences.navigateToPan()
+            .register({ navigateToPan = it })
 
-        preferences.readWithVolumeKeys()
-            .register({ volumeKeysEnabled = it })
+        readerPreferences.landscapeZoom()
+            .register({ landscapeZoom = it }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.readWithVolumeKeysInverted()
-            .register({ volumeKeysInverted = it })
-    }
+        readerPreferences.navigationModePager()
+            .register({ navigationMode = it }, { updateNavigation(navigationMode) })
 
-    fun unsubscribe() {
-        subscriptions.unsubscribe()
-    }
+        readerPreferences.pagerNavInverted()
+            .register({ tappingInverted = it }, { navigator.invertMode = it })
+        readerPreferences.pagerNavInverted().changes()
+            .drop(1)
+            .onEach { navigationModeChangedListener?.invoke() }
+            .launchIn(scope)
 
-    private fun <T> Preference<T>.register(
-            valueAssignment: (T) -> Unit,
-            onChanged: (T) -> Unit = {}
-    ) {
-        asObservable()
-            .doOnNext(valueAssignment)
-            .skip(1)
-            .distinctUntilChanged()
-            .doOnNext(onChanged)
-            .subscribe()
-            .addTo(subscriptions)
+        readerPreferences.dualPageSplitPaged()
+            .register(
+                { dualPageSplit = it },
+                {
+                    imagePropertyChangedListener?.invoke()
+                    dualPageSplitChangedListener?.invoke(it)
+                },
+            )
+
+        readerPreferences.dualPageInvertPaged()
+            .register({ dualPageInvert = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.dualPageRotateToFit()
+            .register(
+                { dualPageRotateToFit = it },
+                { imagePropertyChangedListener?.invoke() },
+            )
+
+        readerPreferences.dualPageRotateToFitInvert()
+            .register(
+                { dualPageRotateToFitInvert = it },
+                { imagePropertyChangedListener?.invoke() },
+            )
     }
 
     private fun zoomTypeFromPreference(value: Int) {
         imageZoomType = when (value) {
             // Auto
             1 -> when (viewer) {
-                is L2RPagerViewer -> ZoomType.Left
-                is R2LPagerViewer -> ZoomType.Right
-                else -> ZoomType.Center
+                is L2RPagerViewer -> ReaderPageImageView.ZoomStartPosition.LEFT
+                is R2LPagerViewer -> ReaderPageImageView.ZoomStartPosition.RIGHT
+                else -> ReaderPageImageView.ZoomStartPosition.CENTER
             }
             // Left
-            2 -> ZoomType.Left
+            2 -> ReaderPageImageView.ZoomStartPosition.LEFT
             // Right
-            3 -> ZoomType.Right
+            3 -> ReaderPageImageView.ZoomStartPosition.RIGHT
             // Center
-            else -> ZoomType.Center
+            else -> ReaderPageImageView.ZoomStartPosition.CENTER
         }
     }
 
-    enum class ZoomType {
-        Left, Center, Right
+    override var navigator: ViewerNavigation = defaultNavigation()
+        set(value) {
+            field = value.also { it.invertMode = this.tappingInverted }
+        }
+
+    override fun defaultNavigation(): ViewerNavigation {
+        return when (viewer) {
+            is VerticalPagerViewer -> LNavigation()
+            else -> RightAndLeftNavigation()
+        }
     }
 
+    override fun updateNavigation(navigationMode: Int) {
+        navigator = when (navigationMode) {
+            0 -> defaultNavigation()
+            1 -> LNavigation()
+            2 -> KindlishNavigation()
+            3 -> EdgeNavigation()
+            4 -> RightAndLeftNavigation()
+            5 -> DisabledNavigation()
+            else -> defaultNavigation()
+        }
+        navigationModeChangedListener?.invoke()
+    }
 }

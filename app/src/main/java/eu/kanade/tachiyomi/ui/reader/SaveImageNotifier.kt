@@ -2,91 +2,52 @@ package eu.kanade.tachiyomi.ui.reader
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.support.v4.app.NotificationCompat
-import com.bumptech.glide.load.engine.DiskCacheStrategy
+import android.net.Uri
+import androidx.core.app.NotificationCompat
+import coil.imageLoader
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.glide.GlideApp
 import eu.kanade.tachiyomi.data.notification.NotificationHandler
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
-import eu.kanade.tachiyomi.util.notificationManager
-import java.io.File
+import eu.kanade.tachiyomi.util.system.cancelNotification
+import eu.kanade.tachiyomi.util.system.getBitmapOrNull
+import eu.kanade.tachiyomi.util.system.notificationBuilder
+import eu.kanade.tachiyomi.util.system.notify
 
 /**
  * Class used to show BigPictureStyle notifications
  */
 class SaveImageNotifier(private val context: Context) {
 
-    /**
-     * Notification builder.
-     */
-    private val notificationBuilder = NotificationCompat.Builder(context, Notifications.CHANNEL_COMMON)
+    private val notificationBuilder = context.notificationBuilder(Notifications.CHANNEL_COMMON)
+    private val notificationId: Int = Notifications.ID_DOWNLOAD_IMAGE
 
     /**
-     * Id of the notification.
-     */
-    private val notificationId: Int
-        get() = Notifications.ID_DOWNLOAD_IMAGE
-
-    /**
-     * Called when image download/copy is complete. This method must be called in a background
-     * thread.
+     * Called when image download/copy is complete.
      *
-     * @param file image file containing downloaded page image.
+     * @param uri image file containing downloaded page image.
      */
-    fun onComplete(file: File) {
-        val bitmap = GlideApp.with(context)
-            .asBitmap()
-            .load(file)
-            .diskCacheStrategy(DiskCacheStrategy.NONE)
-            .skipMemoryCache(true)
-            .submit(720, 1280)
-            .get()
-
-        if (bitmap != null) {
-            showCompleteNotification(file, bitmap)
-        } else {
-            onError(null)
-        }
-    }
-
-    private fun showCompleteNotification(file: File, image: Bitmap) {
-        with(notificationBuilder) {
-            setContentTitle(context.getString(R.string.picture_saved))
-            setSmallIcon(R.drawable.ic_insert_photo_white_24dp)
-            setStyle(NotificationCompat.BigPictureStyle().bigPicture(image))
-            setLargeIcon(image)
-            setAutoCancel(true)
-            // Clear old actions if they exist
-            if (!mActions.isEmpty())
-                mActions.clear()
-
-            setContentIntent(NotificationHandler.openImagePendingActivity(context, file))
-            // Share action
-            addAction(R.drawable.ic_share_grey_24dp,
-                    context.getString(R.string.action_share),
-                    NotificationReceiver.shareImagePendingBroadcast(context, file.absolutePath, notificationId))
-            // Delete action
-            addAction(R.drawable.ic_delete_grey_24dp,
-                    context.getString(R.string.action_delete),
-                    NotificationReceiver.deleteImagePendingBroadcast(context, file.absolutePath, notificationId))
-            updateNotification()
-
-        }
+    fun onComplete(uri: Uri) {
+        val request = ImageRequest.Builder(context)
+            .data(uri)
+            .memoryCachePolicy(CachePolicy.DISABLED)
+            .size(720, 1280)
+            .target(
+                onSuccess = { showCompleteNotification(uri, it.getBitmapOrNull()) },
+                onError = { onError(null) },
+            )
+            .build()
+        context.imageLoader.enqueue(request)
     }
 
     /**
      * Clears the notification message.
      */
     fun onClear() {
-        context.notificationManager.cancel(notificationId)
+        context.cancelNotification(notificationId)
     }
-
-    private fun updateNotification() {
-        // Displays the progress bar on notification
-        context.notificationManager.notify(notificationId, notificationBuilder.build())
-    }
-
 
     /**
      * Called on error while downloading image.
@@ -102,4 +63,37 @@ class SaveImageNotifier(private val context: Context) {
         updateNotification()
     }
 
+    private fun showCompleteNotification(uri: Uri, image: Bitmap?) {
+        with(notificationBuilder) {
+            setContentTitle(context.getString(R.string.picture_saved))
+            setSmallIcon(R.drawable.ic_photo_24dp)
+            image?.let { setStyle(NotificationCompat.BigPictureStyle().bigPicture(it)) }
+            setLargeIcon(image)
+            setAutoCancel(true)
+
+            // Clear old actions if they exist
+            clearActions()
+
+            setContentIntent(NotificationHandler.openImagePendingActivity(context, uri))
+            // Share action
+            addAction(
+                R.drawable.ic_share_24dp,
+                context.getString(R.string.action_share),
+                NotificationReceiver.shareImagePendingBroadcast(context, uri.path!!, notificationId),
+            )
+            // Delete action
+            addAction(
+                R.drawable.ic_delete_24dp,
+                context.getString(R.string.action_delete),
+                NotificationReceiver.deleteImagePendingBroadcast(context, uri.path!!, notificationId),
+            )
+
+            updateNotification()
+        }
+    }
+
+    private fun updateNotification() {
+        // Displays the progress bar on notification
+        context.notify(notificationId, notificationBuilder.build())
+    }
 }

@@ -1,73 +1,55 @@
 package eu.kanade.tachiyomi.ui.library
 
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.widget.FrameLayout
-import com.f2prateek.rx.preferences.Preference
-import eu.davidea.flexibleadapter.FlexibleAdapter
-import eu.davidea.flexibleadapter.items.AbstractFlexibleItem
-import eu.davidea.flexibleadapter.items.IFilterable
-import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.models.LibraryManga
-import eu.kanade.tachiyomi.data.preference.getOrDefault
-import eu.kanade.tachiyomi.widget.AutofitRecyclerView
-import kotlinx.android.synthetic.main.catalogue_grid_item.view.*
+import eu.kanade.tachiyomi.source.getNameForMangaInfo
+import tachiyomi.domain.library.model.LibraryManga
+import tachiyomi.domain.source.service.SourceManager
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
-class LibraryItem(val manga: LibraryManga, private val libraryAsList: Preference<Boolean>) :
-        AbstractFlexibleItem<LibraryHolder>(), IFilterable {
-
-    var downloadCount = -1
-
-    override fun getLayoutRes(): Int {
-        return if (libraryAsList.getOrDefault())
-            R.layout.catalogue_list_item
-        else
-            R.layout.catalogue_grid_item
-    }
-
-    override fun createViewHolder(view: View, adapter: FlexibleAdapter<*>): LibraryHolder {
-        val parent = adapter.recyclerView
-        return if (parent is AutofitRecyclerView) {
-            view.apply {
-                val coverHeight = parent.itemWidth / 3 * 4
-                card.layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, coverHeight)
-                gradient.layoutParams = FrameLayout.LayoutParams(
-                        MATCH_PARENT, coverHeight / 2, Gravity.BOTTOM)
+data class LibraryItem(
+    val libraryManga: LibraryManga,
+    val downloadCount: Long = -1,
+    val unreadCount: Long = -1,
+    val isLocal: Boolean = false,
+    val sourceLanguage: String = "",
+    private val sourceManager: SourceManager = Injekt.get(),
+) {
+    /**
+     * Checks if a query matches the manga
+     *
+     * @param constraint the query to check.
+     * @return true if the manga matches the query, false otherwise.
+     */
+    fun matches(constraint: String): Boolean {
+        val sourceName by lazy { sourceManager.getOrStub(libraryManga.manga.source).getNameForMangaInfo() }
+        return libraryManga.manga.title.contains(constraint, true) ||
+            (libraryManga.manga.author?.contains(constraint, true) ?: false) ||
+            (libraryManga.manga.artist?.contains(constraint, true) ?: false) ||
+            (libraryManga.manga.description?.contains(constraint, true) ?: false) ||
+            constraint.split(",").map { it.trim() }.all { subconstraint ->
+                checkNegatableConstraint(subconstraint) {
+                    sourceName.contains(it, true) ||
+                        (libraryManga.manga.genre?.any { genre -> genre.equals(it, true) } ?: false)
+                }
             }
-            LibraryGridHolder(view, adapter)
-        } else {
-            LibraryListHolder(view, adapter)
-        }
-    }
-
-    override fun bindViewHolder(adapter: FlexibleAdapter<*>,
-                                holder: LibraryHolder,
-                                position: Int,
-                                payloads: List<Any?>?) {
-
-        holder.onSetValues(this)
     }
 
     /**
-     * Filters a manga depending on a query.
+     * Checks a predicate on a negatable constraint. If the constraint starts with a minus character,
+     * the minus is stripped and the result of the predicate is inverted.
      *
-     * @param constraint the query to apply.
-     * @return true if the manga should be included, false otherwise.
+     * @param constraint the argument to the predicate. Inverts the predicate if it starts with '-'.
+     * @param predicate the check to be run against the constraint.
+     * @return !predicate(x) if constraint = "-x", otherwise predicate(constraint)
      */
-    override fun filter(constraint: String): Boolean {
-        return manga.title.contains(constraint, true) ||
-                (manga.author?.contains(constraint, true) ?: false)
-    }
-
-    override fun equals(other: Any?): Boolean {
-        if (other is LibraryItem) {
-            return manga.id == other.manga.id
+    private fun checkNegatableConstraint(
+        constraint: String,
+        predicate: (String) -> Boolean,
+    ): Boolean {
+        return if (constraint.startsWith("-")) {
+            !predicate(constraint.substringAfter("-").trimStart())
+        } else {
+            predicate(constraint)
         }
-        return false
-    }
-
-    override fun hashCode(): Int {
-        return manga.id!!.hashCode()
     }
 }

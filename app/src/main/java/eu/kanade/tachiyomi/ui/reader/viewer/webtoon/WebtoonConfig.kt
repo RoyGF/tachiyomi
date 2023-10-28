@@ -1,74 +1,99 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
-import com.f2prateek.rx.preferences.Preference
-import eu.kanade.tachiyomi.data.preference.PreferencesHelper
-import eu.kanade.tachiyomi.util.addTo
-import rx.subscriptions.CompositeSubscription
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.ViewerConfig
+import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.DisabledNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.EdgeNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.KindlishNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.LNavigation
+import eu.kanade.tachiyomi.ui.reader.viewer.navigation.RightAndLeftNavigation
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 /**
  * Configuration used by webtoon viewers.
  */
-class WebtoonConfig(preferences: PreferencesHelper = Injekt.get()) {
+class WebtoonConfig(
+    scope: CoroutineScope,
+    readerPreferences: ReaderPreferences = Injekt.get(),
+) : ViewerConfig(readerPreferences, scope) {
 
-    private val subscriptions = CompositeSubscription()
-
-    var imagePropertyChangedListener: (() -> Unit)? = null
-
-    var tappingEnabled = true
-        private set
-
-    var longTapEnabled = true
-        private set
-
-    var volumeKeysEnabled = false
-        private set
-
-    var volumeKeysInverted = false
-        private set
+    var themeChangedListener: (() -> Unit)? = null
 
     var imageCropBorders = false
         private set
 
-    var doubleTapAnimDuration = 500
+    var sidePadding = 0
         private set
 
+    var doubleTapZoom = true
+        private set
+
+    var doubleTapZoomChangedListener: ((Boolean) -> Unit)? = null
+
+    val theme = readerPreferences.readerTheme().get()
+
     init {
-        preferences.readWithTapping()
-            .register({ tappingEnabled = it })
-
-        preferences.readWithLongTap()
-            .register({ longTapEnabled = it })
-
-        preferences.cropBordersWebtoon()
+        readerPreferences.cropBordersWebtoon()
             .register({ imageCropBorders = it }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.doubleTapAnimSpeed()
-            .register({ doubleTapAnimDuration = it })
+        readerPreferences.webtoonSidePadding()
+            .register({ sidePadding = it }, { imagePropertyChangedListener?.invoke() })
 
-        preferences.readWithVolumeKeys()
-            .register({ volumeKeysEnabled = it })
+        readerPreferences.navigationModeWebtoon()
+            .register({ navigationMode = it }, { updateNavigation(it) })
 
-        preferences.readWithVolumeKeysInverted()
-            .register({ volumeKeysInverted = it })
-    }
+        readerPreferences.webtoonNavInverted()
+            .register({ tappingInverted = it }, { navigator.invertMode = it })
+        readerPreferences.webtoonNavInverted().changes()
+            .drop(1)
+            .onEach { navigationModeChangedListener?.invoke() }
+            .launchIn(scope)
 
-    fun unsubscribe() {
-        subscriptions.unsubscribe()
-    }
+        readerPreferences.dualPageSplitWebtoon()
+            .register({ dualPageSplit = it }, { imagePropertyChangedListener?.invoke() })
 
-    private fun <T> Preference<T>.register(
-            valueAssignment: (T) -> Unit,
-            onChanged: (T) -> Unit = {}
-    ) {
-        asObservable()
-            .doOnNext(valueAssignment)
-            .skip(1)
+        readerPreferences.dualPageInvertWebtoon()
+            .register({ dualPageInvert = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.webtoonDoubleTapZoomEnabled()
+            .register(
+                { doubleTapZoom = it },
+                { doubleTapZoomChangedListener?.invoke(it) },
+            )
+
+        readerPreferences.readerTheme().changes()
+            .drop(1)
             .distinctUntilChanged()
-            .doOnNext(onChanged)
-            .subscribe()
-            .addTo(subscriptions)
+            .onEach { themeChangedListener?.invoke() }
+            .launchIn(scope)
     }
 
+    override var navigator: ViewerNavigation = defaultNavigation()
+        set(value) {
+            field = value.also { it.invertMode = tappingInverted }
+        }
+
+    override fun defaultNavigation(): ViewerNavigation {
+        return LNavigation()
+    }
+
+    override fun updateNavigation(navigationMode: Int) {
+        this.navigator = when (navigationMode) {
+            0 -> defaultNavigation()
+            1 -> LNavigation()
+            2 -> KindlishNavigation()
+            3 -> EdgeNavigation()
+            4 -> RightAndLeftNavigation()
+            5 -> DisabledNavigation()
+            else -> defaultNavigation()
+        }
+        navigationModeChangedListener?.invoke()
+    }
 }

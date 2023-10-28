@@ -1,9 +1,9 @@
 @file:Suppress("PackageDirectoryMismatch")
 
-package android.support.v7.widget
+package androidx.recyclerview.widget
 
-import android.support.v7.widget.RecyclerView.NO_POSITION
-import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import android.content.Context
+import androidx.recyclerview.widget.RecyclerView.NO_POSITION
 
 /**
  * Layout manager used by the webtoon viewer. Item prefetch is disabled because the extra layout
@@ -13,12 +13,12 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
  * This layout manager uses the same package name as the support library in order to use a package
  * protected method.
  */
-class WebtoonLayoutManager(activity: ReaderActivity) : LinearLayoutManager(activity) {
+class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
 
     /**
      * Extra layout space is set to half the screen height.
      */
-    private val extraLayoutSpace = activity.resources.displayMetrics.heightPixels / 2
+    private val extraLayoutSpace = context.resources.displayMetrics.heightPixels / 2
 
     init {
         isItemPrefetchEnabled = false
@@ -37,19 +37,19 @@ class WebtoonLayoutManager(activity: ReaderActivity) : LinearLayoutManager(activ
     fun findLastEndVisibleItemPosition(): Int {
         ensureLayoutState()
         @ViewBoundsCheck.ViewBounds val preferredBoundsFlag =
-                (ViewBoundsCheck.FLAG_CVE_LT_PVE or ViewBoundsCheck.FLAG_CVE_EQ_PVE)
+            (ViewBoundsCheck.FLAG_CVE_LT_PVE or ViewBoundsCheck.FLAG_CVE_EQ_PVE)
 
         val fromIndex = childCount - 1
         val toIndex = -1
 
-        val child = if (mOrientation == HORIZONTAL)
+        val child = if (mOrientation == HORIZONTAL) {
             mHorizontalBoundCheck
                 .findOneViewWithinBoundFlags(fromIndex, toIndex, preferredBoundsFlag, 0)
-        else
+        } else {
             mVerticalBoundCheck
                 .findOneViewWithinBoundFlags(fromIndex, toIndex, preferredBoundsFlag, 0)
+        }
 
         return if (child == null) NO_POSITION else getPosition(child)
     }
-
 }

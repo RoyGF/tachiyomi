@@ -1,36 +1,30 @@
 -dontobfuscate
 
--dontwarn eu.kanade.tachiyomi.**
--keep class eu.kanade.tachiyomi.**
--keep class eu.kanade.tachiyomi.source.model.** { *; }
+-keep,allowoptimization class eu.kanade.**
+-keep,allowoptimization class tachiyomi.**
 
--keep class com.hippo.image.** { *; }
--keep interface com.hippo.image.** { *; }
--dontwarn nucleus.view.NucleusActionBarActivity
+# Keep common dependencies used in extensions
+-keep,allowoptimization class androidx.preference.** { public protected *; }
+-keep,allowoptimization class kotlin.** { public protected *; }
+-keep,allowoptimization class kotlinx.coroutines.** { public protected *; }
+-keep,allowoptimization class kotlinx.serialization.** { public protected *; }
+-keep,allowoptimization class kotlin.time.** { public protected *; }
+-keep,allowoptimization class okhttp3.** { public protected *; }
+-keep,allowoptimization class okio.** { public protected *; }
+-keep,allowoptimization class org.jsoup.** { public protected *; }
+-keep,allowoptimization class rx.** { public protected *; }
+-keep,allowoptimization class app.cash.quickjs.** { public protected *; }
+-keep,allowoptimization class uy.kohesive.injekt.** { public protected *; }
 
-# Extensions may require methods unused in the core app
--keep class org.jsoup.** { *; }
--keep class kotlin.** { *; }
--keep class okhttp3.** { *; }
--keep class com.google.gson.** { *; }
--keep class com.github.salomonbrys.kotson.** { *; }
+# From extensions-lib
+-keep,allowoptimization class eu.kanade.tachiyomi.network.interceptor.RateLimitInterceptorKt { public protected *; }
+-keep,allowoptimization class eu.kanade.tachiyomi.network.interceptor.SpecificHostRateLimitInterceptorKt { public protected *; }
+-keep,allowoptimization class eu.kanade.tachiyomi.network.NetworkHelper { public protected *; }
+-keep,allowoptimization class eu.kanade.tachiyomi.network.OkHttpExtensionsKt { public protected *; }
+-keep,allowoptimization class eu.kanade.tachiyomi.network.RequestsKt { public protected *; }
+-keep,allowoptimization class eu.kanade.tachiyomi.AppInfo { public protected *; }
 
-# OkHttp
--dontwarn okhttp3.**
--dontwarn okio.**
--dontwarn javax.annotation.**
--dontwarn retrofit2.Platform$Java8
-
-# Glide specific rules #
-# https://github.com/bumptech/glide
--keep public class * implements com.bumptech.glide.module.GlideModule
--keep public class * extends com.bumptech.glide.AppGlideModule
--keep public enum com.bumptech.glide.load.resource.bitmap.ImageHeaderParser$** {
-    **[] $VALUES;
-    public *;
-}
-
-# RxJava 1.1.0
+##---------------Begin: proguard configuration for RxJava 1.x  ----------
 -dontwarn sun.misc.**
 
 -keepclassmembers class rx.internal.util.unsafe.*ArrayQueue*Field* {
@@ -46,47 +40,38 @@
     rx.internal.util.atomic.LinkedQueueNode consumerNode;
 }
 
-### Support v7, Design
-# http://stackoverflow.com/questions/29679177/cardview-shadow-not-appearing-in-lollipop-after-obfuscate-with-proguard/29698051
--keep class android.support.v7.widget.RoundRectDrawable { *; }
+-dontnote rx.internal.util.PlatformDependent
+##---------------End: proguard configuration for RxJava 1.x  ----------
 
--keep public class android.support.v7.widget.** { *; }
--keep public class android.support.v7.internal.widget.** { *; }
--keep public class android.support.v7.internal.view.menu.** { *; }
--keep public class android.support.v7.graphics.drawable.** { *; }
+##---------------Begin: proguard configuration for kotlinx.serialization  ----------
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.AnnotationsKt # core serialization annotations
 
--keep public class * extends android.support.v4.view.ActionProvider {
-    public <init>(android.content.Context);
+# kotlinx-serialization-json specific. Add this if you have java.lang.NoClassDefFoundError kotlinx.serialization.json.JsonObjectSerializer
+-keepclassmembers class kotlinx.serialization.json.** {
+    *** Companion;
+}
+-keepclasseswithmembers class kotlinx.serialization.json.** {
+    kotlinx.serialization.KSerializer serializer(...);
 }
 
--dontwarn android.support.**
--dontwarn android.support.design.**
--keep class android.support.design.** { *; }
--keep interface android.support.design.** { *; }
--keep public class android.support.design.R$* { *; }
+-keep,includedescriptorclasses class eu.kanade.**$$serializer { *; }
+-keepclassmembers class eu.kanade.** {
+    *** Companion;
+}
+-keepclasseswithmembers class eu.kanade.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
 
+-keep class kotlinx.serialization.**
+-keepclassmembers class kotlinx.serialization.** {
+    <methods>;
+}
+##---------------End: proguard configuration for kotlinx.serialization  ----------
 
-# ReactiveNetwork
--dontwarn com.github.pwittchen.reactivenetwork.**
+# XmlUtil
+-keep public enum nl.adaptivity.xmlutil.EventType { *; }
 
-## GSON ##
-
-# Gson uses generic type information stored in a class file when working with fields. Proguard
-# removes such information by default, so configure it to keep all of it.
--keepattributes Signature
-
-# Gson specific classes
--keep class sun.misc.Unsafe { *; }
-
-# Prevent proguard from stripping interface information from TypeAdapterFactory,
-# JsonSerializer, JsonDeserializer instances (so they can be used in @JsonAdapter)
--keep class * implements com.google.gson.TypeAdapterFactory
--keep class * implements com.google.gson.JsonSerializer
--keep class * implements com.google.gson.JsonDeserializer
-
-# SnakeYaml
--keep class org.yaml.snakeyaml.** { public protected private *; }
--dontwarn org.yaml.snakeyaml.**
-
-# Duktape
--keep class com.squareup.duktape.** { *; }
+# Firebase
+-keep class com.google.firebase.installations.** { *; }
+-keep interface com.google.firebase.installations.** { *; }

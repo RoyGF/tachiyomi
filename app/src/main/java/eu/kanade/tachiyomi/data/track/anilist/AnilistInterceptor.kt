@@ -2,7 +2,7 @@ package eu.kanade.tachiyomi.data.track.anilist
 
 import okhttp3.Interceptor
 import okhttp3.Response
-
+import java.io.IOException
 
 class AnilistInterceptor(val anilist: Anilist, private var token: String?) : Interceptor {
 
@@ -23,24 +23,24 @@ class AnilistInterceptor(val anilist: Anilist, private var token: String?) : Int
         if (token.isNullOrEmpty()) {
             throw Exception("Not authenticated with Anilist")
         }
-        if (oauth == null){
+        if (oauth == null) {
             oauth = anilist.loadOAuth()
         }
         // Refresh access token if null or expired.
         if (oauth!!.isExpired()) {
             anilist.logout()
-            throw Exception("Token expired")
+            throw IOException("Token expired")
         }
 
         // Throw on null auth.
         if (oauth == null) {
-            throw Exception("No authentication token")
+            throw IOException("No authentication token")
         }
 
         // Add the authorization header to the original request.
         val authRequest = originalRequest.newBuilder()
-                .addHeader("Authorization", "Bearer ${oauth!!.access_token}")
-                .build()
+            .addHeader("Authorization", "Bearer ${oauth!!.access_token}")
+            .build()
 
         return chain.proceed(authRequest)
     }
@@ -54,5 +54,4 @@ class AnilistInterceptor(val anilist: Anilist, private var token: String?) : Int
         this.oauth = oauth
         anilist.saveOAuth(oauth)
     }
-
 }

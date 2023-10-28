@@ -2,20 +2,22 @@ package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
 import android.os.Handler
+import android.os.Looper
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import kotlin.math.abs
 
 /**
  * A custom gesture detector that also implements an on long tap confirmed, because the built-in
  * one conflicts with the quick scale feature.
  */
 open class GestureDetectorWithLongTap(
-        context: Context,
-        listener: Listener
+    context: Context,
+    listener: Listener,
 ) : GestureDetector(context, listener) {
 
-    private val handler = Handler()
+    private val handler = Handler(Looper.getMainLooper())
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val longTapTime = ViewConfiguration.getLongPressTimeout().toLong()
     private val doubleTapTime = ViewConfiguration.getDoubleTapTimeout().toLong()
@@ -39,13 +41,13 @@ open class GestureDetectorWithLongTap(
                 // This is the key difference with the built-in detector. We have to ignore the
                 // event if the last up and current down are too close in time (double tap).
                 if (ev.downTime - lastUp > doubleTapTime) {
-                    downX = ev.rawX
-                    downY = ev.rawY
+                    downX = ev.x
+                    downY = ev.y
                     handler.postDelayed(longTapFn, longTapTime)
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (Math.abs(ev.rawX - downX) > slop || Math.abs(ev.rawY - downY) > slop) {
+                if (abs(ev.x - downX) > slop || abs(ev.y - downY) > slop) {
                     handler.removeCallbacks(longTapFn)
                 }
             }
@@ -70,5 +72,4 @@ open class GestureDetectorWithLongTap(
         open fun onLongTapConfirmed(ev: MotionEvent) {
         }
     }
-
 }

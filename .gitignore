@@ -2,8 +2,16 @@
 /local.properties
 /.idea/workspace.xml
 .DS_Store
-/build
-.idea/
+.idea/*
+!.idea/icon.png
 *iml
 *.iml
+
+# Built files
 */build
+/build
+*.apk
+app/**/output.json
+
+# Unnecessary file
+*.swp

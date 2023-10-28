@@ -1,17 +1,34 @@
-**DO NOT OPEN ISSUES/REQUESTS RELATING TO EXTENSIONS/CATALOGUES IN THIS REPOSITORY. Open them at the following repository  https://github.com/inorichi/tachiyomi-extensions/**
+**PLEASE READ THIS**
 
-**For all other requests Please fill out the form below and remove the first 3 lines of this template**
+I acknowledge that:
 
-**App version:**
+- I have updated:
+  - To the latest version of the app (stable is v0.14.7)
+  - All extensions
+- I have gone through the FAQ (https://tachiyomi.org/docs/faq/general) and troubleshooting guide (https://tachiyomi.org/docs/guides/troubleshooting/)
+- If this is an issue with an extension, that I should be opening an issue in https://github.com/tachiyomiorg/tachiyomi-extensions
+- I have searched the existing issues and this is new ticket **NOT** a duplicate or related to another open or closed issue
+- I will fill out the title and the information in this template
 
-**Android version:**
+Note that the issue will be automatically closed if you do not fill out the title or requested information.
 
-**Issue/Request:**
+**DELETE THIS SECTION IF YOU HAVE READ AND ACKNOWLEDGED IT**
 
-**Steps to reproduce (if applicable)**
+---
 
- 1.
- 2.
- 3.
+## Device information
+* Tachiyomi version: ?
+* Android version: ?
+* Device: ?
 
-**Other details:**
+## Steps to reproduce
+1. First step
+2. Second step
+
+## Issue/Request
+?
+
+## Other details
+Additional details and attachments.
+
+If you're experiencing crashes, share the crash logs from More → Settings → Advanced → Dump crash logs.

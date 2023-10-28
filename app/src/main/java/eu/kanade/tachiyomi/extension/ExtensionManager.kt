@@ -1,24 +1,32 @@
 package eu.kanade.tachiyomi.extension
 
 import android.content.Context
-import com.jakewharton.rxrelay.BehaviorRelay
-import eu.kanade.tachiyomi.data.preference.PreferencesHelper
-import eu.kanade.tachiyomi.data.preference.getOrDefault
+import android.graphics.drawable.Drawable
+import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.extension.api.ExtensionGithubApi
+import eu.kanade.tachiyomi.extension.api.ExtensionUpdateNotifier
 import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.extension.model.InstallStep
 import eu.kanade.tachiyomi.extension.model.LoadResult
 import eu.kanade.tachiyomi.extension.util.ExtensionInstallReceiver
 import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.extension.util.ExtensionLoader
-import eu.kanade.tachiyomi.source.SourceManager
-import eu.kanade.tachiyomi.util.launchNow
-import kotlinx.coroutines.experimental.async
-import rx.Observable
-import rx.android.schedulers.AndroidSchedulers
-import rx.schedulers.Schedulers
+import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import logcat.LogPriority
+import tachiyomi.core.preference.plusAssign
+import tachiyomi.core.util.lang.launchNow
+import tachiyomi.core.util.lang.withUIContext
+import tachiyomi.core.util.system.logcat
+import tachiyomi.domain.source.model.StubSource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.util.Locale
 
 /**
  * The manager of extensions installed as another apk which extend the available sources. It handles
@@ -31,9 +39,12 @@ import uy.kohesive.injekt.api.get
  * @param preferences The application preferences.
  */
 class ExtensionManager(
-        private val context: Context,
-        private val preferences: PreferencesHelper = Injekt.get()
+    private val context: Context,
+    private val preferences: SourcePreferences = Injekt.get(),
 ) {
+
+    var isInitialized = false
+        private set
 
     /**
      * API where all the available extensions can be found.
@@ -45,59 +56,42 @@ class ExtensionManager(
      */
     private val installer by lazy { ExtensionInstaller(context) }
 
-    /**
-     * Relay used to notify the installed extensions.
-     */
-    private val installedExtensionsRelay = BehaviorRelay.create<List<Extension.Installed>>()
+    private val iconMap = mutableMapOf<String, Drawable>()
 
-    /**
-     * List of the currently installed extensions.
-     */
-    var installedExtensions = emptyList<Extension.Installed>()
-        private set(value) {
-            field = value
-            installedExtensionsRelay.call(value)
+    private val _installedExtensionsFlow = MutableStateFlow(emptyList<Extension.Installed>())
+    val installedExtensionsFlow = _installedExtensionsFlow.asStateFlow()
+
+    private var subLanguagesEnabledOnFirstRun = preferences.enabledLanguages().isSet()
+
+    fun getAppIconForSource(sourceId: Long): Drawable? {
+        val pkgName = _installedExtensionsFlow.value.find { ext -> ext.sources.any { it.id == sourceId } }?.pkgName
+        if (pkgName != null) {
+            return iconMap[pkgName] ?: iconMap.getOrPut(pkgName) {
+                ExtensionLoader.getExtensionPackageInfoFromPkgName(context, pkgName)!!.applicationInfo
+                    .loadIcon(context.packageManager)
+            }
         }
+        return null
+    }
 
-    /**
-     * Relay used to notify the available extensions.
-     */
-    private val availableExtensionsRelay = BehaviorRelay.create<List<Extension.Available>>()
+    private val _availableExtensionsFlow = MutableStateFlow(emptyList<Extension.Available>())
+    val availableExtensionsFlow = _availableExtensionsFlow.asStateFlow()
 
-    /**
-     * List of the currently available extensions.
-     */
-    var availableExtensions = emptyList<Extension.Available>()
-        private set(value) {
-            field = value
-            availableExtensionsRelay.call(value)
-            setUpdateFieldOfInstalledExtensions(value)
-        }
+    private var availableExtensionsSourcesData: Map<Long, StubSource> = emptyMap()
 
-    /**
-     * Relay used to notify the untrusted extensions.
-     */
-    private val untrustedExtensionsRelay = BehaviorRelay.create<List<Extension.Untrusted>>()
+    private fun setupAvailableExtensionsSourcesDataMap(extensions: List<Extension.Available>) {
+        if (extensions.isEmpty()) return
+        availableExtensionsSourcesData = extensions
+            .flatMap { ext -> ext.sources.map { it.toStubSource() } }
+            .associateBy { it.id }
+    }
 
-    /**
-     * List of the currently untrusted extensions.
-     */
-    var untrustedExtensions = emptyList<Extension.Untrusted>()
-        private set(value) {
-            field = value
-            untrustedExtensionsRelay.call(value)
-        }
+    fun getSourceData(id: Long) = availableExtensionsSourcesData[id]
 
-    /**
-     * The source manager where the sources of the extensions are added.
-     */
-    private lateinit var sourceManager: SourceManager
+    private val _untrustedExtensionsFlow = MutableStateFlow(emptyList<Extension.Untrusted>())
+    val untrustedExtensionsFlow = _untrustedExtensionsFlow.asStateFlow()
 
-    /**
-     * Initializes this manager with the given source manager.
-     */
-    fun init(sourceManager: SourceManager) {
-        this.sourceManager = sourceManager
+    init {
         initExtensions()
         ExtensionInstallReceiver(InstallationListener()).register(context)
     }
@@ -108,49 +102,64 @@ class ExtensionManager(
     private fun initExtensions() {
         val extensions = ExtensionLoader.loadExtensions(context)
 
-        installedExtensions = extensions
-                .filterIsInstance<LoadResult.Success>()
-                .map { it.extension }
-        installedExtensions
-                .flatMap { it.sources }
-                // overwrite is needed until the bundled sources are removed
-                .forEach { sourceManager.registerSource(it, true) }
+        _installedExtensionsFlow.value = extensions
+            .filterIsInstance<LoadResult.Success>()
+            .map { it.extension }
 
-        untrustedExtensions = extensions
-                .filterIsInstance<LoadResult.Untrusted>()
-                .map { it.extension }
-    }
+        _untrustedExtensionsFlow.value = extensions
+            .filterIsInstance<LoadResult.Untrusted>()
+            .map { it.extension }
 
-    /**
-     * Returns the relay of the installed extensions as an observable.
-     */
-    fun getInstalledExtensionsObservable(): Observable<List<Extension.Installed>> {
-        return installedExtensionsRelay.asObservable()
-    }
-
-    /**
-     * Returns the relay of the available extensions as an observable.
-     */
-    fun getAvailableExtensionsObservable(): Observable<List<Extension.Available>> {
-        return availableExtensionsRelay.asObservable()
-    }
-
-    /**
-     * Returns the relay of the untrusted extensions as an observable.
-     */
-    fun getUntrustedExtensionsObservable(): Observable<List<Extension.Untrusted>> {
-        return untrustedExtensionsRelay.asObservable()
+        isInitialized = true
     }
 
     /**
      * Finds the available extensions in the [api] and updates [availableExtensions].
      */
-    fun findAvailableExtensions() {
-        api.findExtensions()
-                .onErrorReturn { emptyList() }
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe { availableExtensions = it }
+    suspend fun findAvailableExtensions() {
+        val extensions: List<Extension.Available> = try {
+            api.findExtensions()
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            withUIContext { context.toast(R.string.extension_api_error) }
+            emptyList()
+        }
+
+        enableAdditionalSubLanguages(extensions)
+
+        _availableExtensionsFlow.value = extensions
+        updatedInstalledExtensionsStatuses(extensions)
+        setupAvailableExtensionsSourcesDataMap(extensions)
+    }
+
+    /**
+     * Enables the additional sub-languages in the app first run. This addresses
+     * the issue where users still need to enable some specific languages even when
+     * the device language is inside that major group. As an example, if a user
+     * has a zh device language, the app will also enable zh-Hans and zh-Hant.
+     *
+     * If the user have already changed the enabledLanguages preference value once,
+     * the new languages will not be added to respect the user enabled choices.
+     */
+    private fun enableAdditionalSubLanguages(extensions: List<Extension.Available>) {
+        if (subLanguagesEnabledOnFirstRun || extensions.isEmpty()) {
+            return
+        }
+
+        // Use the source lang as some aren't present on the extension level.
+        val availableLanguages = extensions
+            .flatMap(Extension.Available::sources)
+            .distinctBy(Extension.Available.Source::lang)
+            .map(Extension.Available.Source::lang)
+
+        val deviceLanguage = Locale.getDefault().language
+        val defaultLanguages = preferences.enabledLanguages().defaultValue()
+        val languagesToEnable = availableLanguages.filter {
+            it != deviceLanguage && it.startsWith(deviceLanguage)
+        }
+
+        preferences.enabledLanguages().set(defaultLanguages + languagesToEnable)
+        subLanguagesEnabledOnFirstRun = true
     }
 
     /**
@@ -158,66 +167,85 @@ class ExtensionManager(
      *
      * @param availableExtensions The list of extensions given by the [api].
      */
-    private fun setUpdateFieldOfInstalledExtensions(availableExtensions: List<Extension.Available>) {
-        val mutInstalledExtensions = installedExtensions.toMutableList()
+    private fun updatedInstalledExtensionsStatuses(availableExtensions: List<Extension.Available>) {
+        if (availableExtensions.isEmpty()) {
+            preferences.extensionUpdatesCount().set(0)
+            return
+        }
+
+        val mutInstalledExtensions = _installedExtensionsFlow.value.toMutableList()
         var changed = false
 
         for ((index, installedExt) in mutInstalledExtensions.withIndex()) {
             val pkgName = installedExt.pkgName
-            val availableExt = availableExtensions.find { it.pkgName == pkgName } ?: continue
+            val availableExt = availableExtensions.find { it.pkgName == pkgName }
 
-            val hasUpdate = availableExt.versionCode > installedExt.versionCode
-            if (installedExt.hasUpdate != hasUpdate) {
-                mutInstalledExtensions[index] = installedExt.copy(hasUpdate = hasUpdate)
+            if (!installedExt.isUnofficial && availableExt == null && !installedExt.isObsolete) {
+                mutInstalledExtensions[index] = installedExt.copy(isObsolete = true)
                 changed = true
+            } else if (availableExt != null) {
+                val hasUpdate = installedExt.updateExists(availableExt)
+
+                if (installedExt.hasUpdate != hasUpdate) {
+                    mutInstalledExtensions[index] = installedExt.copy(hasUpdate = hasUpdate)
+                    changed = true
+                }
             }
         }
         if (changed) {
-            installedExtensions = mutInstalledExtensions
+            _installedExtensionsFlow.value = mutInstalledExtensions
         }
+        updatePendingUpdatesCount()
     }
 
     /**
-     * Returns an observable of the installation process for the given extension. It will complete
+     * Returns a flow of the installation process for the given extension. It will complete
      * once the extension is installed or throws an error. The process will be canceled if
      * unsubscribed before its completion.
      *
      * @param extension The extension to be installed.
      */
-    fun installExtension(extension: Extension.Available): Observable<InstallStep> {
+    fun installExtension(extension: Extension.Available): Flow<InstallStep> {
         return installer.downloadAndInstall(api.getApkUrl(extension), extension)
     }
 
     /**
-     * Returns an observable of the installation process for the given extension. It will complete
+     * Returns a flow of the installation process for the given extension. It will complete
      * once the extension is updated or throws an error. The process will be canceled if
      * unsubscribed before its completion.
      *
      * @param extension The extension to be updated.
      */
-    fun updateExtension(extension: Extension.Installed): Observable<InstallStep>  {
-        val availableExt = availableExtensions.find { it.pkgName == extension.pkgName }
-                ?: return Observable.empty()
+    fun updateExtension(extension: Extension.Installed): Flow<InstallStep> {
+        val availableExt = _availableExtensionsFlow.value.find { it.pkgName == extension.pkgName }
+            ?: return emptyFlow()
         return installExtension(availableExt)
     }
 
+    fun cancelInstallUpdateExtension(extension: Extension) {
+        installer.cancelInstall(extension.pkgName)
+    }
+
     /**
-     * Sets the result of the installation of an extension.
+     * Sets to "installing" status of an extension installation.
      *
      * @param downloadId The id of the download.
-     * @param result Whether the extension was installed or not.
      */
-    fun setInstallationResult(downloadId: Long, result: Boolean) {
-        installer.setInstallationResult(downloadId, result)
+    fun setInstalling(downloadId: Long) {
+        installer.updateInstallStep(downloadId, InstallStep.Installing)
+    }
+
+    fun updateInstallStep(downloadId: Long, step: InstallStep) {
+        installer.updateInstallStep(downloadId, step)
     }
 
     /**
      * Uninstalls the extension that matches the given package name.
      *
-     * @param pkgName The package name of the application to uninstall.
+     * @param extension The extension to uninstall.
      */
-    fun uninstallExtension(pkgName: String) {
-        installer.uninstallApk(pkgName)
+    fun uninstallExtension(extension: Extension) {
+        installer.uninstallApk(extension.pkgName)
     }
 
     /**
@@ -227,28 +255,22 @@ class ExtensionManager(
      * @param signature The signature to whitelist.
      */
     fun trustSignature(signature: String) {
-        val untrustedSignatures = untrustedExtensions.map { it.signatureHash }.toSet()
+        val untrustedSignatures = _untrustedExtensionsFlow.value.map { it.signatureHash }.toSet()
         if (signature !in untrustedSignatures) return
 
         ExtensionLoader.trustedSignatures += signature
-        val preference = preferences.trustedSignatures()
-        preference.set(preference.getOrDefault() + signature)
+        preferences.trustedSignatures() += signature
 
-        val nowTrustedExtensions = untrustedExtensions.filter { it.signatureHash == signature }
-        untrustedExtensions -= nowTrustedExtensions
+        val nowTrustedExtensions = _untrustedExtensionsFlow.value.filter { it.signatureHash == signature }
+        _untrustedExtensionsFlow.value -= nowTrustedExtensions
 
-        val ctx = context
         launchNow {
             nowTrustedExtensions
-                    .map { extension ->
-                        async { ExtensionLoader.loadExtensionFromPkgName(ctx, extension.pkgName) }
-                    }
-                    .map { it.await() }
-                    .forEach { result ->
-                        if (result is LoadResult.Success) {
-                            registerNewExtension(result.extension)
-                        }
-                    }
+                .map { extension ->
+                    async { ExtensionLoader.loadExtensionFromPkgName(context, extension.pkgName) }.await()
+                }
+                .filterIsInstance<LoadResult.Success>()
+                .forEach { registerNewExtension(it.extension) }
         }
     }
 
@@ -258,8 +280,7 @@ class ExtensionManager(
      * @param extension The extension to be registered.
      */
     private fun registerNewExtension(extension: Extension.Installed) {
-        installedExtensions += extension
-        extension.sources.forEach { sourceManager.registerSource(it) }
+        _installedExtensionsFlow.value += extension
     }
 
     /**
@@ -269,15 +290,13 @@ class ExtensionManager(
      * @param extension The extension to be registered.
      */
     private fun registerUpdatedExtension(extension: Extension.Installed) {
-        val mutInstalledExtensions = installedExtensions.toMutableList()
+        val mutInstalledExtensions = _installedExtensionsFlow.value.toMutableList()
         val oldExtension = mutInstalledExtensions.find { it.pkgName == extension.pkgName }
         if (oldExtension != null) {
             mutInstalledExtensions -= oldExtension
-            extension.sources.forEach { sourceManager.unregisterSource(it) }
         }
         mutInstalledExtensions += extension
-        installedExtensions = mutInstalledExtensions
-        extension.sources.forEach { sourceManager.registerSource(it) }
+        _installedExtensionsFlow.value = mutInstalledExtensions
     }
 
     /**
@@ -287,14 +306,13 @@ class ExtensionManager(
      * @param pkgName The package name of the uninstalled application.
      */
     private fun unregisterExtension(pkgName: String) {
-        val installedExtension = installedExtensions.find { it.pkgName == pkgName }
+        val installedExtension = _installedExtensionsFlow.value.find { it.pkgName == pkgName }
         if (installedExtension != null) {
-            installedExtensions -= installedExtension
-            installedExtension.sources.forEach { sourceManager.unregisterSource(it) }
+            _installedExtensionsFlow.value -= installedExtension
         }
-        val untrustedExtension = untrustedExtensions.find { it.pkgName == pkgName }
+        val untrustedExtension = _untrustedExtensionsFlow.value.find { it.pkgName == pkgName }
         if (untrustedExtension != null) {
-            untrustedExtensions -= untrustedExtension
+            _untrustedExtensionsFlow.value -= untrustedExtension
         }
     }
 
@@ -305,18 +323,22 @@ class ExtensionManager(
 
         override fun onExtensionInstalled(extension: Extension.Installed) {
             registerNewExtension(extension.withUpdateCheck())
+            updatePendingUpdatesCount()
         }
 
         override fun onExtensionUpdated(extension: Extension.Installed) {
             registerUpdatedExtension(extension.withUpdateCheck())
+            updatePendingUpdatesCount()
         }
 
         override fun onExtensionUntrusted(extension: Extension.Untrusted) {
-            untrustedExtensions += extension
+            _untrustedExtensionsFlow.value += extension
         }
 
         override fun onPackageUninstalled(pkgName: String) {
+            ExtensionLoader.uninstallPrivateExtension(context, pkgName)
             unregisterExtension(pkgName)
+            updatePendingUpdatesCount()
         }
     }
 
@@ -324,11 +346,25 @@ class ExtensionManager(
      * Extension method to set the update field of an installed extension.
      */
     private fun Extension.Installed.withUpdateCheck(): Extension.Installed {
-        val availableExt = availableExtensions.find { it.pkgName == pkgName }
-        if (availableExt != null && availableExt.versionCode > versionCode) {
-            return copy(hasUpdate = true)
+        return if (updateExists()) {
+            copy(hasUpdate = true)
+        } else {
+            this
         }
-        return this
     }
 
+    private fun Extension.Installed.updateExists(availableExtension: Extension.Available? = null): Boolean {
+        val availableExt = availableExtension ?: _availableExtensionsFlow.value.find { it.pkgName == pkgName }
+        if (isUnofficial || availableExt == null) return false
+
+        return (availableExt.versionCode > versionCode || availableExt.libVersion > libVersion)
+    }
+
+    private fun updatePendingUpdatesCount() {
+        val pendingUpdateCount = _installedExtensionsFlow.value.count { it.hasUpdate }
+        preferences.extensionUpdatesCount().set(pendingUpdateCount)
+        if (pendingUpdateCount == 0) {
+            ExtensionUpdateNotifier(context).dismiss()
+        }
+    }
 }

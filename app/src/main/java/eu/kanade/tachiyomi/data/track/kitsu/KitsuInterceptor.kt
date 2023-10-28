@@ -1,10 +1,13 @@
 package eu.kanade.tachiyomi.data.track.kitsu
 
-import com.google.gson.Gson
+import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.Response
+import uy.kohesive.injekt.injectLazy
 
-class KitsuInterceptor(val kitsu: Kitsu, val gson: Gson) : Interceptor {
+class KitsuInterceptor(val kitsu: Kitsu) : Interceptor {
+
+    private val json: Json by injectLazy()
 
     /**
      * OAuth object used for authenticated requests.
@@ -22,7 +25,7 @@ class KitsuInterceptor(val kitsu: Kitsu, val gson: Gson) : Interceptor {
         if (currAuth.isExpired()) {
             val response = chain.proceed(KitsuApi.refreshTokenRequest(refreshToken))
             if (response.isSuccessful) {
-                newAuth(gson.fromJson(response.body()!!.string(), OAuth::class.java))
+                newAuth(json.decodeFromString(response.body.string()))
             } else {
                 response.close()
             }
@@ -30,10 +33,10 @@ class KitsuInterceptor(val kitsu: Kitsu, val gson: Gson) : Interceptor {
 
         // Add the authorization header to the original request.
         val authRequest = originalRequest.newBuilder()
-                .addHeader("Authorization", "Bearer ${oauth!!.access_token}")
-                .header("Accept", "application/vnd.api+json")
-                .header("Content-Type", "application/vnd.api+json")
-                .build()
+            .addHeader("Authorization", "Bearer ${oauth!!.access_token}")
+            .header("Accept", "application/vnd.api+json")
+            .header("Content-Type", "application/vnd.api+json")
+            .build()
 
         return chain.proceed(authRequest)
     }
@@ -42,5 +45,4 @@ class KitsuInterceptor(val kitsu: Kitsu, val gson: Gson) : Interceptor {
         this.oauth = oauth
         kitsu.saveToken(oauth)
     }
-
 }

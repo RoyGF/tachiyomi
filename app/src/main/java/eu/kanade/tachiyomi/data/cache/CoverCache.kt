@@ -1,7 +1,8 @@
 package eu.kanade.tachiyomi.data.cache
 
 import android.content.Context
-import eu.kanade.tachiyomi.util.DiskUtil
+import eu.kanade.tachiyomi.util.storage.DiskUtil
+import tachiyomi.domain.manga.model.Manga
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -9,7 +10,6 @@ import java.io.InputStream
 /**
  * Class used to create cover cache.
  * It is used to store the covers of the library.
- * Makes use of Glide (which can avoid repeating requests) to download covers.
  * Names of files are created with the md5 of the thumbnail URL.
  *
  * @param context the application context.
@@ -17,51 +17,89 @@ import java.io.InputStream
  */
 class CoverCache(private val context: Context) {
 
+    companion object {
+        private const val COVERS_DIR = "covers"
+        private const val CUSTOM_COVERS_DIR = "covers/custom"
+    }
+
     /**
      * Cache directory used for cache management.
      */
-    private val cacheDir = context.getExternalFilesDir("covers") ?:
-            File(context.filesDir, "covers").also { it.mkdirs() }
+    private val cacheDir = getCacheDir(COVERS_DIR)
+
+    private val customCoverCacheDir = getCacheDir(CUSTOM_COVERS_DIR)
 
     /**
      * Returns the cover from cache.
      *
-     * @param thumbnailUrl the thumbnail url.
+     * @param mangaThumbnailUrl thumbnail url for the manga.
      * @return cover image.
      */
-    fun getCoverFile(thumbnailUrl: String): File {
-        return File(cacheDir, DiskUtil.hashKeyForDisk(thumbnailUrl))
+    fun getCoverFile(mangaThumbnailUrl: String?): File? {
+        return mangaThumbnailUrl?.let {
+            File(cacheDir, DiskUtil.hashKeyForDisk(it))
+        }
     }
 
     /**
-     * Copy the given stream to this cache.
+     * Returns the custom cover from cache.
      *
-     * @param thumbnailUrl url of the thumbnail.
-     * @param inputStream  the stream to copy.
+     * @param mangaId the manga id.
+     * @return cover image.
+     */
+    fun getCustomCoverFile(mangaId: Long?): File {
+        return File(customCoverCacheDir, DiskUtil.hashKeyForDisk(mangaId.toString()))
+    }
+
+    /**
+     * Saves the given stream as the manga's custom cover to cache.
+     *
+     * @param manga the manga.
+     * @param inputStream the stream to copy.
      * @throws IOException if there's any error.
      */
     @Throws(IOException::class)
-    fun copyToCache(thumbnailUrl: String, inputStream: InputStream) {
-        // Get destination file.
-        val destFile = getCoverFile(thumbnailUrl)
-
-        destFile.outputStream().use { inputStream.copyTo(it) }
+    fun setCustomCoverToCache(manga: Manga, inputStream: InputStream) {
+        getCustomCoverFile(manga.id).outputStream().use {
+            inputStream.copyTo(it)
+        }
     }
 
     /**
-     * Delete the cover file from the cache.
+     * Delete the cover files of the manga from the cache.
      *
-     * @param thumbnailUrl the thumbnail url.
-     * @return status of deletion.
+     * @param manga the manga.
+     * @param deleteCustomCover whether the custom cover should be deleted.
+     * @return number of files that were deleted.
      */
-    fun deleteFromCache(thumbnailUrl: String?): Boolean {
-        // Check if url is empty.
-        if (thumbnailUrl.isNullOrEmpty())
-            return false
+    fun deleteFromCache(manga: Manga, deleteCustomCover: Boolean = false): Int {
+        var deleted = 0
 
-        // Remove file.
-        val file = getCoverFile(thumbnailUrl!!)
-        return file.exists() && file.delete()
+        getCoverFile(manga.thumbnailUrl)?.let {
+            if (it.exists() && it.delete()) ++deleted
+        }
+
+        if (deleteCustomCover) {
+            if (deleteCustomCover(manga.id)) ++deleted
+        }
+
+        return deleted
     }
 
+    /**
+     * Delete custom cover of the manga from the cache
+     *
+     * @param mangaId the manga id.
+     * @return whether the cover was deleted.
+     */
+    fun deleteCustomCover(mangaId: Long?): Boolean {
+        return getCustomCoverFile(mangaId).let {
+            it.exists() && it.delete()
+        }
+    }
+
+    private fun getCacheDir(dir: String): File {
+        return context.getExternalFilesDir(dir)
+            ?: File(context.filesDir, dir).also { it.mkdirs() }
+    }
 }

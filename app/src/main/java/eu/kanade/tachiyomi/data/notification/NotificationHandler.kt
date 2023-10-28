@@ -4,9 +4,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.net.toUri
+import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.ui.main.MainActivity
-import eu.kanade.tachiyomi.util.getUriCompat
-import java.io.File
+import tachiyomi.core.Constants
 
 /**
  * Class that manages [PendingIntent] of activity's
@@ -19,10 +20,10 @@ object NotificationHandler {
      */
     internal fun openDownloadManagerPendingActivity(context: Context): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-            action = MainActivity.SHORTCUT_DOWNLOADS
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = Constants.SHORTCUT_DOWNLOADS
         }
-        return PendingIntent.getActivity(context, 0, intent, 0)
+        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
     /**
@@ -31,13 +32,12 @@ object NotificationHandler {
      * @param context context of application
      * @param file file containing image
      */
-    internal fun openImagePendingActivity(context: Context, file: File): PendingIntent {
+    internal fun openImagePendingActivity(context: Context, uri: Uri): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            val uri = file.getUriCompat(context)
             setDataAndType(uri, "image/*")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
         }
-        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
     /**
@@ -48,9 +48,14 @@ object NotificationHandler {
      */
     fun installApkPendingActivity(context: Context, uri: Uri): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
+            setDataAndType(uri, ExtensionInstaller.APK_MIME)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
         }
-        return PendingIntent.getActivity(context, 0, intent, 0)
+        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    fun openUrl(context: Context, url: String): PendingIntent {
+        val notificationIntent = Intent(Intent.ACTION_VIEW, url.toUri())
+        return PendingIntent.getActivity(context, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
     }
 }

@@ -1,9 +1,12 @@
 package eu.kanade.tachiyomi.ui.download
 
 import android.view.View
+import androidx.recyclerview.widget.ItemTouchHelper
+import eu.davidea.viewholders.FlexibleViewHolder
+import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.model.Download
-import eu.kanade.tachiyomi.ui.base.holder.BaseViewHolder
-import kotlinx.android.synthetic.main.download_item.view.*
+import eu.kanade.tachiyomi.databinding.DownloadItemBinding
+import eu.kanade.tachiyomi.util.view.popupMenu
 
 /**
  * Class used to hold the data of a download.
@@ -12,33 +15,39 @@ import kotlinx.android.synthetic.main.download_item.view.*
  * @param view the inflated view for this holder.
  * @constructor creates a new download holder.
  */
-class DownloadHolder(private val view: View) : BaseViewHolder(view) {
+class DownloadHolder(private val view: View, val adapter: DownloadAdapter) :
+    FlexibleViewHolder(view, adapter) {
+
+    private val binding = DownloadItemBinding.bind(view)
+
+    init {
+        setDragHandleView(binding.reorder)
+        binding.menu.setOnClickListener { it.post { showPopupMenu(it) } }
+    }
 
     private lateinit var download: Download
 
     /**
-     * Method called from [DownloadAdapter.onBindViewHolder]. It updates the data for this
-     * holder with the given download.
+     * Binds this holder with the given category.
      *
-     * @param download the download to bind.
+     * @param category The category to bind.
      */
-    fun onSetValues(download: Download) {
+    fun bind(download: Download) {
         this.download = download
-
         // Update the chapter name.
-        view.chapter_title.text = download.chapter.name
+        binding.chapterTitle.text = download.chapter.name
 
         // Update the manga title
-        view.manga_title.text = download.manga.title
+        binding.mangaFullTitle.text = download.manga.title
 
         // Update the progress bar and the number of downloaded pages
         val pages = download.pages
         if (pages == null) {
-            view.download_progress.progress = 0
-            view.download_progress.max = 1
-            view.download_progress_text.text = ""
+            binding.downloadProgress.progress = 0
+            binding.downloadProgress.max = 1
+            binding.downloadProgressText.text = ""
         } else {
-            view.download_progress.max = pages.size * 100
+            binding.downloadProgress.max = pages.size * 100
             notifyProgress()
             notifyDownloadedPages()
         }
@@ -49,10 +58,10 @@ class DownloadHolder(private val view: View) : BaseViewHolder(view) {
      */
     fun notifyProgress() {
         val pages = download.pages ?: return
-        if (view.download_progress.max == 1) {
-            view.download_progress.max = pages.size * 100
+        if (binding.downloadProgress.max == 1) {
+            binding.downloadProgress.max = pages.size * 100
         }
-        view.download_progress.progress = download.totalProgress
+        binding.downloadProgress.setProgressCompat(download.totalProgress, true)
     }
 
     /**
@@ -60,7 +69,33 @@ class DownloadHolder(private val view: View) : BaseViewHolder(view) {
      */
     fun notifyDownloadedPages() {
         val pages = download.pages ?: return
-        view.download_progress_text.text = "${download.downloadedImages}/${pages.size}"
+        binding.downloadProgressText.text = "${download.downloadedImages}/${pages.size}"
     }
 
+    override fun onItemReleased(position: Int) {
+        super.onItemReleased(position)
+        adapter.downloadItemListener.onItemReleased(position)
+        binding.container.isDragged = false
+    }
+
+    override fun onActionStateChanged(position: Int, actionState: Int) {
+        super.onActionStateChanged(position, actionState)
+        if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+            binding.container.isDragged = true
+        }
+    }
+
+    private fun showPopupMenu(view: View) {
+        view.popupMenu(
+            menuRes = R.menu.download_single,
+            initMenu = {
+                findItem(R.id.move_to_top).isVisible = bindingAdapterPosition > 1
+                findItem(R.id.move_to_bottom).isVisible =
+                    bindingAdapterPosition != adapter.itemCount - 1
+            },
+            onMenuItemClick = {
+                adapter.downloadItemListener.onMenuItemClick(bindingAdapterPosition, this)
+            },
+        )
+    }
 }
